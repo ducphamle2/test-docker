@@ -21,7 +21,7 @@ s3 = boto3.client(
 )
 
 
-@app.route("/")
+@app.route("/hello")
 def read_file_from_s3():
     try:
         # Read the file from S3
