@@ -1,51 +1,44 @@
-import json
-from flask import Flask
-import psycopg2
+from flask import Flask, jsonify
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 import os
 
 app = Flask(__name__)
 
-if 'POSTGRES_PASSWORD_FILE' in os.environ:
-   with open(os.environ['POSTGRES_PASSWORD_FILE'], 'r') as f:
-       password = f.read().strip()
-else:
-   password = os.environ['POSTGRES_PASSWORD']
+# Configure your AWS credentials
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = "us-east-1"
+BUCKET_NAME = "cpsc5910-lab6-bucket"
+FILE_NAME = "lab6-object"
 
-@app.route('/')
-def hello_world():
-    return 'Hello, Docker!!!'
-
-
-@app.route('/widgets')
-def get_widgets():
-    with psycopg2.connect(host="db", user="postgres", password=password, database="example") as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM widgets")
-            row_headers = [x[0] for x in cur.description]
-            results = cur.fetchall()
-    conn.close()
-
-    json_data = [dict(zip(row_headers, result)) for result in results]
-    return json.dumps(json_data)
+# Initialize the S3 client
+s3 = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+)
 
 
-@app.route('/initdb')
-def db_init():
-    conn = psycopg2.connect(host="db", user="postgres", password=password)
-    conn.set_session(autocommit=True)
-    with conn.cursor() as cur:
-        cur.execute("DROP DATABASE IF EXISTS example")
-        cur.execute("CREATE DATABASE example")
-    conn.close()
+@app.route("/")
+def read_file_from_s3():
+    try:
+        # Read the file from S3
+        s3_object = s3.get_object(Bucket=BUCKET_NAME, Key=FILE_NAME)
+        file_content = s3_object["Body"].read().decode("utf-8")
 
-    with psycopg2.connect(host="db", user="postgres", password=password, database="example") as conn:
-        with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS widgets")
-            cur.execute("CREATE TABLE widgets (name VARCHAR(255), description VARCHAR(255))")
-    conn.close()
+        return jsonify(file_content)
 
-    return 'init database'
+    except NoCredentialsError:
+        return jsonify({"error": "Credentials not available"}), 403
+
+    except PartialCredentialsError:
+        return jsonify({"error": "Incomplete credentials"}), 403
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0')
+    app.run(debug=True)
